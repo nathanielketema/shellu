@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const readline = b.addTranslateC(.{
-        .root_source_file = b.path("src/readline.h"),
+        .root_source_file = b.path("include/readline.h"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
