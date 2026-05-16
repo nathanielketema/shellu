@@ -22,7 +22,7 @@ const Command = struct {
     string: []const u8,
 };
 
-pub fn parse(gpa: Allocator, raw_input: []u8) !Input {
+pub fn parse(gpa: Allocator, raw_input: []const u8) !Input {
     assert(raw_input.len > 0);
 
     var args: ArrayList([]const u8) = .empty;

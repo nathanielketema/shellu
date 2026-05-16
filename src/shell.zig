@@ -34,7 +34,7 @@ pub const BuiltinContext = struct {
 pub const Shell = struct {
     path_dirs: []PathDir,
     home_path: []const u8,
-    current_working_directory: []const u8,
+    current_working_directory: [:0]const u8,
     io: Io,
     gpa: Allocator,
 
@@ -69,6 +69,7 @@ pub const Shell = struct {
     pub fn deinit(shell: *Shell) void {
         for (shell.path_dirs) |path_dir| path_dir.dir.close(shell.io);
         shell.gpa.free(shell.path_dirs);
+        shell.gpa.free(shell.current_working_directory);
     }
 
     pub fn run_external(shell: *Shell, writer: *Io.Writer, input: Input) !void {
@@ -127,10 +128,10 @@ pub const Shell = struct {
         pub const Command = enum {
             echo,
             type,
-            exit,
             cd,
             pwd,
             history,
+            exit,
 
             pub fn parse(command: []const u8) ?Command {
                 return std.meta.stringToEnum(Command, command);
@@ -155,16 +156,16 @@ pub const Shell = struct {
             const writer = context.writer;
             if (input.args.len == 0) return;
 
-            for (input.args) |arg| {
+            for (input.args) |arg| bigLoop: {
                 if (Builtin.Command.parse(arg)) |builtin| {
                     try writer.print("{s} is a shell builtin\n", .{@tagName(builtin)});
-                    return;
+                    continue;
                 }
 
                 for (shell.path_dirs) |path_dir| {
                     path_dir.dir.access(shell.io, arg, .{ .execute = true }) catch continue;
                     try writer.print("{s} is {s}/{s}\n", .{ arg, path_dir.string, arg });
-                    return;
+                    break :bigLoop;
                 }
 
                 try writer.print("{s}: not found\n", .{arg});
@@ -191,7 +192,9 @@ pub const Shell = struct {
             Io.Threaded.chdir(dir_path) catch {
                 try writer.print("cd: {s}: No such file or directory\n", .{dir_path});
             };
-            context.shell.current_working_directory = dir_path;
+            const cwd = try std.process.currentPathAlloc(shell.io, shell.gpa);
+            shell.gpa.free(shell.current_working_directory);
+            shell.current_working_directory = cwd;
         }
 
         pub fn pwd(context: BuiltinContext) !void {
