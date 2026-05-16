@@ -76,7 +76,9 @@ pub const Shell = struct {
         assert(input.command.string.len > 0);
 
         for (shell.path_dirs) |path_dir| {
-            path_dir.dir.access(shell.io, input.command.string, .{ .execute = true }) catch continue;
+            path_dir.dir.access(shell.io, input.command.string, .{
+                .execute = true,
+            }) catch continue;
 
             var argv: ArrayList([]const u8) = .empty;
             defer argv.deinit(shell.gpa);
@@ -225,7 +227,8 @@ pub const Shell = struct {
             }
 
             for (start..history_count + 1) |i| {
-                const entry: [*c]readline.HIST_ENTRY = readline.history_get(@intCast(i)) orelse continue;
+                const entry: [*c]readline.HIST_ENTRY =
+                    readline.history_get(@intCast(i)) orelse continue;
                 const line: [*c]const u8 = entry.*.line orelse continue;
                 try writer.print("    {d} {s}\n", .{ i, mem.span(line) });
             }
