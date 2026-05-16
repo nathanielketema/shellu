@@ -13,6 +13,12 @@ pub fn maybe(ok: bool) void {
     assert(ok or !ok);
 }
 
+pub const ShellOption = struct {
+    writer: *Io.Writer,
+    input: Input,
+    arena: Allocator,
+};
+
 pub const ShellConfig = struct {
     path_env: []const u8,
     home_env: []const u8,
@@ -29,6 +35,7 @@ pub const BuiltinContext = struct {
     writer: *Io.Writer,
     input: Input,
     shell: *Shell,
+    arena: Allocator,
 };
 
 pub const Shell = struct {
@@ -72,7 +79,10 @@ pub const Shell = struct {
         shell.gpa.free(shell.current_working_directory);
     }
 
-    pub fn run_external(shell: *Shell, writer: *Io.Writer, input: Input) !void {
+    pub fn run_external(shell: *Shell, option: ShellOption) !void {
+        const input = option.input;
+        const writer = option.writer;
+
         assert(input.command.builtin == null);
         assert(input.command.string.len > 0);
 
@@ -82,17 +92,16 @@ pub const Shell = struct {
             }) catch continue;
 
             var argv: ArrayList([]const u8) = .empty;
-            defer argv.deinit(shell.gpa);
             defer assert(argv.items.len > 0);
 
-            try argv.append(shell.gpa, input.command.string);
+            try argv.append(option.arena, input.command.string);
             for (input.args) |arg| {
                 const expand_arg = if (mem.startsWith(u8, arg, "~"))
-                    try mem.concat(shell.gpa, u8, &.{ shell.home_path, arg[1..] })
+                    try mem.concat(option.arena, u8, &.{ shell.home_path, arg[1..] })
                 else
                     arg;
 
-                try argv.append(shell.gpa, expand_arg);
+                try argv.append(option.arena, expand_arg);
             }
 
             var child = try std.process.spawn(shell.io, .{ .argv = argv.items });
@@ -103,23 +112,24 @@ pub const Shell = struct {
         try writer.print("{s}: command not found\n", .{input.command.string});
     }
 
-    pub fn run_builtin(shell: *Shell, writer: *Io.Writer, input: Input) !void {
-        assert(input.command.builtin != null);
-        maybe(input.args.len == 0);
+    pub fn run_builtin(shell: *Shell, option: ShellOption) !void {
+        assert(option.input.command.builtin != null);
+        maybe(option.input.args.len == 0);
 
-        const context: BuiltinContext = .{
-            .writer = writer,
-            .input = input,
+        const builtin_context: BuiltinContext = .{
+            .writer = option.writer,
+            .input = option.input,
             .shell = shell,
+            .arena = option.arena,
         };
 
-        const command = input.command.builtin.?;
+        const command = builtin_context.input.command.builtin.?;
         switch (command) {
-            .echo => try Builtin.echo(context),
-            .type => try Builtin.type(context),
-            .cd => try Builtin.cd(context),
-            .pwd => try Builtin.pwd(context),
-            .history => try Builtin.history(context),
+            .echo => try Builtin.echo(builtin_context),
+            .type => try Builtin.type(builtin_context),
+            .cd => try Builtin.cd(builtin_context),
+            .pwd => try Builtin.pwd(builtin_context),
+            .history => try Builtin.history(builtin_context),
             .exit => std.process.exit(0),
         }
     }
@@ -176,6 +186,7 @@ pub const Shell = struct {
             const input = context.input;
             const shell = context.shell;
             const writer = context.writer;
+            const arena = context.arena;
 
             if (input.args.len > 1) {
                 try writer.print("Error: too many arguments\n", .{});
@@ -185,7 +196,7 @@ pub const Shell = struct {
 
             const arg = if (input.args.len == 0) shell.home_path else input.args[0];
             const dir_path = if (mem.startsWith(u8, arg, "~"))
-                try mem.concat(shell.gpa, u8, &.{ shell.home_path, arg[1..] })
+                try mem.concat(arena, u8, &.{ shell.home_path, arg[1..] })
             else
                 arg;
 

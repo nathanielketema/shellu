@@ -10,6 +10,7 @@ const readline = @import("readline");
 
 const Input = @import("Input.zig");
 const Shell = @import("shell.zig").Shell;
+const ShellOption = @import("shell.zig").ShellOption;
 const Snapshot = @import("Snapshot.zig");
 const snap = Snapshot.snap;
 
@@ -35,12 +36,21 @@ pub fn main(init: std.process.Init) !void {
         if (raw_input.len == 0) continue; // Empty commands are ignored
         _ = readline.add_history(raw_input_c);
 
-        var input: Input = try .parse(gpa, raw_input);
-        defer input.deinit();
+        var arena_instance: std.heap.ArenaAllocator = .init(gpa);
+        defer arena_instance.deinit();
+        const arena = arena_instance.allocator();
+
+        const input: Input = try .parse(arena, raw_input);
+
+        const shell_option: ShellOption = .{
+            .input = input,
+            .arena = arena,
+            .writer = stdout,
+        };
 
         if (input.command.builtin) |_| {
-            try shell.run_builtin(stdout, input);
-        } else try shell.run_external(stdout, input);
+            try shell.run_builtin(shell_option);
+        } else try shell.run_external(shell_option);
 
         try stdout.flush();
     }
@@ -62,9 +72,18 @@ fn check(raw_input: []const u8, want: Snapshot) !void {
     var input: Input = try .parse(gpa, raw_input);
     defer input.deinit();
 
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    const shell_option: ShellOption = .{
+        .input = input,
+        .writer = &allocating.writer,
+        .arena = arena.allocator(),
+    };
+
     if (input.command.builtin) |_| {
-        try shell.run_builtin(&allocating.writer, input);
-    } else try shell.run_external(&allocating.writer, input);
+        try shell.run_builtin(shell_option);
+    } else try shell.run_external(shell_option);
 
     const got = allocating.written();
     try Snapshot.diff(&want, got);
