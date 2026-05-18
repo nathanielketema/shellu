@@ -40,7 +40,10 @@ pub fn main(init: std.process.Init) !void {
         defer arena_instance.deinit();
         const arena = arena_instance.allocator();
 
-        const input: Input = try .parse(arena, raw_input);
+        const input = Input.parse(arena, raw_input) catch |err| {
+            std.log.err("failed to parse {s} due to {any}\n", .{raw_input, err});
+            return err;
+        };
 
         const shell_option: ShellOption = .{
             .input = input,

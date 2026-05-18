@@ -6,12 +6,10 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const Shell = @import("shell.zig").Shell;
+const stdx = @import("stdx.zig");
+const maybe = stdx.maybe;
 
 const Input = @This();
-
-pub fn maybe(ok: bool) void {
-    assert(ok or !ok);
-}
 
 command: Command,
 args: []const []const u8,
