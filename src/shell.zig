@@ -125,16 +125,16 @@ pub const Shell = struct {
 
         const command = builtin_context.input.command.builtin.?;
         switch (command) {
-            .echo => try Builtin.echo(builtin_context),
-            .type => try Builtin.type(builtin_context),
-            .cd => try Builtin.cd(builtin_context),
-            .pwd => try Builtin.pwd(builtin_context),
-            .history => try Builtin.history(builtin_context),
+            .echo => try builtin.echo(builtin_context),
+            .type => try builtin.type(builtin_context),
+            .cd => try builtin.cd(builtin_context),
+            .pwd => try builtin.pwd(builtin_context),
+            .history => try builtin.history(builtin_context),
             .exit => std.process.exit(0),
         }
     }
 
-    pub const Builtin = struct {
+    pub const builtin = struct {
         pub const Command = enum {
             echo,
             type,
@@ -167,8 +167,8 @@ pub const Shell = struct {
             if (input.args.len == 0) return;
 
             for (input.args) |arg| bigLoop: {
-                if (Builtin.Command.parse(arg)) |builtin| {
-                    try writer.print("{s} is a shell builtin\n", .{@tagName(builtin)});
+                if (builtin.Command.parse(arg)) |cmd| {
+                    try writer.print("{s} is a shell builtin\n", .{@tagName(cmd)});
                     continue;
                 }
 
