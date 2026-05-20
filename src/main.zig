@@ -11,8 +11,9 @@ const readline = @import("readline");
 const Input = @import("Input.zig");
 const Shell = @import("shell.zig").Shell;
 const ShellOption = @import("shell.zig").ShellOption;
-const Snapshot = @import("Snapshot.zig");
-const snap = Snapshot.snap;
+const stdx = @import("stdx.zig");
+const Snapshot = stdx.Snapshot;
+const snap = stdx.Snapshot.snap;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
