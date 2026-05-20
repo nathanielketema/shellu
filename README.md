@@ -19,9 +19,3 @@ zig build test
 
 - [zig](https://ziglang.org/)
 - [readline](https://tiswww.case.edu/php/chet/readline/rltop.html)
-
-## Planned work
-
-- [ ] swap readline dependency with linenoise-zig
-  - this would mean no system dependency other than zig
-- [ ] logging
