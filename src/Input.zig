@@ -15,9 +15,9 @@ command: Command,
 args: []const []const u8,
 gpa: Allocator,
 
-const Command = struct {
-    builtin: ?Shell.Builtin.Command,
-    string: []const u8,
+const Command = union(enum) {
+    builtin: Shell.builtin.Command,
+    external: []const u8,
 };
 
 pub fn parse(gpa: Allocator, raw_input: []const u8) !Input {
@@ -30,10 +30,10 @@ pub fn parse(gpa: Allocator, raw_input: []const u8) !Input {
     const command_string = it.next().?;
     assert(command_string.len > 0);
 
-    const command: Command = .{
-        .builtin = .parse(command_string),
-        .string = command_string,
-    };
+    const command: Command = if (Shell.builtin.Command.parse(command_string)) |builtin|
+        .{ .builtin = builtin }
+    else
+        .{ .external = command_string };
 
     while (it.next()) |arg| try args.append(gpa, arg);
     maybe(args.items.len == 0);

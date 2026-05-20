@@ -83,18 +83,21 @@ pub const Shell = struct {
         const input = option.input;
         const writer = option.writer;
 
-        assert(input.command.builtin == null);
-        assert(input.command.string.len > 0);
+        const command = switch (input.command) {
+            .external => |command| command,
+            .builtin => unreachable,
+        };
+        assert(command.len > 0);
 
         for (shell.path_dirs) |path_dir| {
-            path_dir.dir.access(shell.io, input.command.string, .{
+            path_dir.dir.access(shell.io, command, .{
                 .execute = true,
             }) catch continue;
 
             var argv: ArrayList([]const u8) = .empty;
             defer assert(argv.items.len > 0);
 
-            try argv.append(option.arena, input.command.string);
+            try argv.append(option.arena, command);
             for (input.args) |arg| {
                 const expand_arg = if (mem.startsWith(u8, arg, "~"))
                     try mem.concat(option.arena, u8, &.{ shell.home_path, arg[1..] })
@@ -109,27 +112,29 @@ pub const Shell = struct {
             return;
         }
 
-        try writer.print("{s}: command not found\n", .{input.command.string});
+        try writer.print("{s}: command not found\n", .{command});
     }
 
     pub fn run_builtin(shell: *Shell, option: ShellOption) !void {
-        assert(option.input.command.builtin != null);
         maybe(option.input.args.len == 0);
 
-        const builtin_context: BuiltinContext = .{
+        const context: BuiltinContext = .{
             .writer = option.writer,
             .input = option.input,
             .shell = shell,
             .arena = option.arena,
         };
 
-        const command = builtin_context.input.command.builtin.?;
+        const command = switch (context.input.command) {
+            .builtin => |command| command,
+            .external => unreachable,
+        };
         switch (command) {
-            .echo => try builtin.echo(builtin_context),
-            .type => try builtin.type(builtin_context),
-            .cd => try builtin.cd(builtin_context),
-            .pwd => try builtin.pwd(builtin_context),
-            .history => try builtin.history(builtin_context),
+            .echo => try builtin.echo(context),
+            .type => try builtin.type(context),
+            .cd => try builtin.cd(context),
+            .pwd => try builtin.pwd(context),
+            .history => try builtin.history(context),
             .exit => std.process.exit(0),
         }
     }

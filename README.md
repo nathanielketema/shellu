@@ -11,6 +11,7 @@ zig build run
 Test could be run as:
 
 ```console
+cd src
 zig build test
 ```
 

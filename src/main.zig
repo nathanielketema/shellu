@@ -41,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
         const arena = arena_instance.allocator();
 
         const input = Input.parse(arena, raw_input) catch |err| {
-            std.log.err("failed to parse {s} due to {any}\n", .{raw_input, err});
+            std.log.err("failed to parse {s} due to {any}\n", .{ raw_input, err });
             return err;
         };
 
@@ -51,9 +51,10 @@ pub fn main(init: std.process.Init) !void {
             .writer = stdout,
         };
 
-        if (input.command.builtin) |_| {
-            try shell.run_builtin(shell_option);
-        } else try shell.run_external(shell_option);
+        switch (input.command) {
+            .builtin => try shell.run_builtin(shell_option),
+            .external => try shell.run_external(shell_option),
+        }
 
         try stdout.flush();
     }
@@ -84,9 +85,10 @@ fn check(raw_input: []const u8, want: Snapshot) !void {
         .arena = arena.allocator(),
     };
 
-    if (input.command.builtin) |_| {
-        try shell.run_builtin(shell_option);
-    } else try shell.run_external(shell_option);
+    switch (input.command) {
+        .builtin => try shell.run_builtin(shell_option),
+        .external => try shell.run_external(shell_option),
+    }
 
     const got = allocating.written();
     try Snapshot.diff(&want, got);
