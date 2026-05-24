@@ -1,50 +1,183 @@
 const std = @import("std");
-const Io = std.Io;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const mem = std.mem;
+const testing = std.testing;
+const log = std.log;
 
 const Shell = @import("shell.zig").Shell;
-const stdx = @import("stdx.zig");
-const maybe = stdx.maybe;
+const builtin = Shell.builtin;
 
 const Input = @This();
 
 command: Command,
 args: []const []const u8,
-gpa: Allocator,
 
 const Command = union(enum) {
-    builtin: Shell.builtin.Command,
+    builtin: builtin.Command,
     external: []const u8,
 };
 
-pub fn parse(gpa: Allocator, raw_input: []const u8) !Input {
-    assert(raw_input.len > 0);
+pub const State = enum {
+    seeking,
+    parsing,
+    single,
+    double,
+    expanding,
+};
 
-    var args: ArrayList([]const u8) = .empty;
-    errdefer args.deinit(gpa);
+pub const Token = enum(u8) {
+    space = ' ',
+    tilde = '~',
+    single_quote = '\'',
+    double_quote = '"',
+    dollar = '$',
+    left_curly = '{',
+    right_curly = '}',
+    back_slash = '\\',
+    _,
+};
 
-    var it = mem.tokenizeAny(u8, raw_input, " ");
-    const command_string = it.next().?;
-    assert(command_string.len > 0);
+pub fn parse(arena: Allocator, shell: *Shell, text: []const u8) !Input {
+    assert(text.len > 0);
+    var words: ArrayList([]const u8) = try .initCapacity(arena, text.len);
+    var word: ArrayList(u8) = try .initCapacity(arena, text.len);
+    var temp: ArrayList(u8) = try .initCapacity(arena, text.len);
 
-    const command: Command = if (Shell.builtin.Command.parse(command_string)) |builtin|
-        .{ .builtin = builtin }
+    var state: State = .seeking;
+    var index: usize = 0;
+    while (index < text.len) {
+        const token: Token = @enumFromInt(text[index]);
+        const next_token: Token = if (index < text.len - 1)
+            @enumFromInt(text[index + 1])
+        else
+            @enumFromInt(0);
+        switch (state) {
+            .seeking => switch (token) {
+                .space => index += 1,
+                .single_quote => {
+                    state = .single;
+                    index += 1;
+                },
+                .double_quote => {
+                    state = .double;
+                    index += 1;
+                },
+                .tilde => {
+                    state = .parsing;
+                    try word.appendSlice(arena, shell.home_path);
+                    index += 1;
+                },
+                .dollar => {
+                    state = .expanding;
+                    index += 1;
+                },
+                .back_slash => {
+                    try word.append(arena, @intFromEnum(next_token));
+                    index += 2;
+                },
+                else => {
+                    state = .parsing;
+                    try word.append(arena, @intFromEnum(token));
+                    index += 1;
+                },
+            },
+            .expanding => switch (token) {
+                .space, .dollar, .right_curly => {
+                    state = .parsing;
+                    const value = shell.records.get(temp.items);
+                    if (value) |val| {
+                        try word.appendSlice(arena, val);
+                    }
+                    temp.clearRetainingCapacity();
+                },
+                .left_curly => state = .parsing,
+                else => {
+                    try temp.append(arena, @intFromEnum(token));
+                    index += 1;
+                },
+            },
+            .parsing => switch (token) {
+                .single_quote => {
+                    state = .single;
+                    index += 1;
+                },
+                .double_quote => {
+                    state = .double;
+                    index += 1;
+                },
+                .space => {
+                    state = .seeking;
+                    if (word.items.len != 0) {
+                        try words.append(arena, try word.toOwnedSlice(arena));
+                        word.clearRetainingCapacity();
+                    }
+                    index += 1;
+                },
+                .dollar, .left_curly => {
+                    state = .expanding;
+                    index += 1;
+                },
+                .back_slash => {
+                    try word.append(arena, @intFromEnum(next_token));
+                    index += 2;
+                },
+                .right_curly => index += 1,
+                else => {
+                    try word.append(arena, @intFromEnum(token));
+                    index += 1;
+                },
+            },
+            .single => switch (token) {
+                .single_quote => {
+                    state = .parsing;
+                    index += 1;
+                },
+                else => {
+                    try word.append(arena, @intFromEnum(token));
+                    index += 1;
+                },
+            },
+            .double => switch (token) {
+                .double_quote => {
+                    state = .parsing;
+                    index += 1;
+                },
+                .back_slash => {
+                    try word.append(arena, @intFromEnum(next_token));
+                    index += 2;
+                },
+                else => {
+                    try word.append(arena, @intFromEnum(token));
+                    index += 1;
+                },
+            },
+        }
+    }
+    if (state != .seeking) {
+        if (state == .expanding) {
+            const value = shell.records.get(temp.items);
+            if (value) |val| {
+                try word.appendSlice(arena, val);
+            }
+            if (word.items.len != 0) {
+                try words.append(arena, try word.toOwnedSlice(arena));
+            }
+        } else try words.append(arena, try word.toOwnedSlice(arena));
+    }
+    assert(index >= text.len);
+    assert(words.items.len > 0);
+
+    const argv = try words.toOwnedSlice(arena);
+    const cmd_str = argv[0];
+
+    const command: Command = if (builtin.Command.parse(cmd_str)) |cmd|
+        .{ .builtin = cmd }
     else
-        .{ .external = command_string };
-
-    while (it.next()) |arg| try args.append(gpa, arg);
-    maybe(args.items.len == 0);
+        .{ .external = cmd_str };
 
     return .{
         .command = command,
-        .args = try args.toOwnedSlice(gpa),
-        .gpa = gpa,
+        .args = argv[1..],
     };
-}
-
-pub fn deinit(input: *Input) void {
-    input.gpa.free(input.args);
 }
