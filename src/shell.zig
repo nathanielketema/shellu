@@ -4,6 +4,7 @@ const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const mem = std.mem;
+const StringHashMap = std.StringHashMap;
 
 const readline = @import("readline");
 
@@ -41,6 +42,7 @@ pub const BuiltinContext = struct {
 pub const Shell = struct {
     path_dirs: []PathDir,
     home_path: []const u8,
+    records: StringHashMap([]const u8),
     current_working_directory: [:0]const u8,
     io: Io,
     gpa: Allocator,
@@ -67,6 +69,7 @@ pub const Shell = struct {
         return .{
             .path_dirs = try path_dirs.toOwnedSlice(gpa),
             .home_path = config.home_env,
+            .records = .init(gpa),
             .current_working_directory = try std.process.currentPathAlloc(io, gpa),
             .io = io,
             .gpa = gpa,
@@ -77,6 +80,11 @@ pub const Shell = struct {
         for (shell.path_dirs) |path_dir| path_dir.dir.close(shell.io);
         shell.gpa.free(shell.path_dirs);
         shell.gpa.free(shell.current_working_directory);
+        var keys = shell.records.keyIterator();
+        while (keys.next()) |key| shell.gpa.free(key.*);
+        var values = shell.records.valueIterator();
+        while (values.next()) |value| shell.gpa.free(value.*);
+        shell.records.deinit();
     }
 
     pub fn run_external(shell: *Shell, option: ShellOption) !void {
@@ -135,6 +143,7 @@ pub const Shell = struct {
             .cd => try builtin.cd(context),
             .pwd => try builtin.pwd(context),
             .history => try builtin.history(context),
+            .declare => try builtin.declare(context),
             .exit => std.process.exit(0),
         }
     }
@@ -146,6 +155,7 @@ pub const Shell = struct {
             cd,
             pwd,
             history,
+            declare,
             exit,
 
             pub fn parse(command: []const u8) ?Command {
@@ -191,22 +201,16 @@ pub const Shell = struct {
             const input = context.input;
             const shell = context.shell;
             const writer = context.writer;
-            const arena = context.arena;
 
             if (input.args.len > 1) {
                 try writer.print("Error: too many arguments\n", .{});
                 try writer.print("Usage: cd [path]\n", .{});
                 return;
             }
-
             const arg = if (input.args.len == 0) shell.home_path else input.args[0];
-            const dir_path = if (mem.startsWith(u8, arg, "~"))
-                try mem.concat(arena, u8, &.{ shell.home_path, arg[1..] })
-            else
-                arg;
 
-            Io.Threaded.chdir(dir_path) catch {
-                try writer.print("cd: {s}: No such file or directory\n", .{dir_path});
+            Io.Threaded.chdir(arg) catch {
+                try writer.print("cd: {s}: No such file or directory\n", .{arg});
             };
             const cwd = try std.process.currentPathAlloc(shell.io, shell.gpa);
             shell.gpa.free(shell.current_working_directory);
@@ -251,6 +255,38 @@ pub const Shell = struct {
                 const line: [*c]const u8 = entry.*.line orelse continue;
                 try writer.print("    {d} {s}\n", .{ i, mem.span(line) });
             }
+        }
+
+        pub fn declare(context: BuiltinContext) !void {
+            const gpa = context.shell.gpa;
+            const writer = context.writer;
+            const args = context.input.args;
+            var records = &context.shell.records;
+            if (args.len == 0 or args.len > 2) return;
+
+            if (!mem.eql(u8, args[0], "-p")) {
+                const record = mem.cut(u8, args[0], "=") orelse return;
+                const key = try gpa.dupe(u8, record.@"0");
+                const value = try gpa.dupe(u8, record.@"1");
+                if (std.ascii.isDigit(key[0]) or
+                    mem.containsAtLeastScalar(u8, key, 1, '-'))
+                {
+                    try writer.print(
+                        "declare: `{s}': not a valid identifier\n",
+                        .{args[0]},
+                    );
+                    return;
+                }
+                try records.put(key, value);
+                return;
+            }
+
+            if (records.contains(args[1])) {
+                try writer.print("declare -- {s}=\"{s}\"\n", .{
+                    args[1],
+                    records.get(args[1]).?,
+                });
+            } else try writer.print("declare: {s}: not found\n", .{args[1]});
         }
     };
 };
