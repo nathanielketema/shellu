@@ -60,3 +60,78 @@ pub fn main(init: std.process.Init) !void {
         try stdout.flush();
     }
 }
+
+fn check(raw_input: []const u8, want: Snapshot) !void {
+    const io = testing.io;
+    const gpa = testing.allocator;
+
+    var allocating: Io.Writer.Allocating = .init(gpa);
+    defer allocating.deinit();
+
+    var environ = try testing.environ.createMap(gpa);
+    defer environ.deinit();
+
+    var shell: Shell = try .init(io, gpa, .from_environment(&environ));
+    defer shell.deinit();
+
+    var input: Input = try .parse(gpa, raw_input);
+    defer input.deinit();
+
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    const shell_option: ShellOption = .{
+        .input = input,
+        .writer = &allocating.writer,
+        .arena = arena.allocator(),
+    };
+
+    switch (input.command) {
+        .builtin => try shell.run_builtin(shell_option),
+        .external => try shell.run_external(shell_option),
+    }
+
+    const got = allocating.written();
+    try Snapshot.diff(&want, got);
+}
+
+test "echo" {
+    try check("echo Hello ..    World  !~", snap(@src(),
+        \\Hello .. World !~
+        \\
+    ));
+
+    try check("echo", snap(@src(),
+        \\
+        \\
+    ));
+}
+
+test "type" {
+    try check("type", snap(@src(),
+        \\
+    ));
+
+    try check("type echo", snap(@src(),
+        \\echo is a shell builtin
+        \\
+    ));
+
+    try check("type foo", snap(@src(),
+        \\foo: not found
+        \\
+    ));
+
+    try check("type which", snap(@src(),
+        \\which is /usr/bin/which
+        \\
+    ));
+
+    try check("type zsh bash ls exit", snap(@src(),
+        \\zsh is /bin/zsh
+        \\bash is /bin/bash
+        \\ls is /bin/ls
+        \\exit is a shell builtin
+        \\
+    ));
+}
