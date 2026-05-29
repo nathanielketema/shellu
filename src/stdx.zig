@@ -2,7 +2,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 const Io = std.Io;
-const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const SourceLocation = std.builtin.SourceLocation;
 
