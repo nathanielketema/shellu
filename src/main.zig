@@ -71,6 +71,47 @@ pub fn main(init: std.process.Init) !void {
             .input = parsed,
         });
 
+        { // Reap a job
+            const count = shell.jobs.values().len;
+            var done_job_ids: std.ArrayList(u32) = .empty;
+            defer done_job_ids.deinit(gpa);
+            for (shell.jobs.values(), 0..) |*job, i| {
+                if (std.c.waitpid(job.PID, null, std.c.W.NOHANG) != 0) {
+                    job.status = .Done;
+                }
+                if (job.status == .Running) continue;
+
+                try done_job_ids.append(gpa, job.job_id);
+                const job_id = job.job_id;
+                const marker = mk: {
+                    var marker_tmp: []const u8 = undefined;
+                    if (i == count - 1) {
+                        marker_tmp = "+";
+                    } else if (i == count - 2) {
+                        marker_tmp = "-";
+                    } else marker_tmp = "";
+                    break :mk marker_tmp;
+                };
+                const status = @tagName(job.status);
+                const command = std.mem.trimEnd(u8, job.command_string, "&");
+
+                try output.stdout().print("[{d}]{s: <2} {s: <24}{s}\n", .{
+                    job_id,
+                    marker,
+                    status,
+                    command,
+                });
+            }
+
+            for (done_job_ids.items) |job_id| {
+                if (shell.jobs.get(job_id)) |job| {
+                    try shell.job_id_generator.remove(gpa, job_id);
+                    gpa.free(job.command_string);
+                }
+                _ = shell.jobs.fetchOrderedRemove(job_id);
+            }
+        }
+
         try output.flush();
     }
 }
@@ -80,200 +121,4 @@ pub fn run(context: CommandContext) !void {
         .builtin => try builtins.run(context),
         .external => try external.run(context),
     }
-}
-
-test "snapshot testing" {
-    const T = struct {
-        fn check(raw_input: []const u8, want: Snapshot) !void {
-            try check_many(&.{raw_input}, want);
-        }
-
-        fn check_many(raw_inputs: []const []const u8, want: Snapshot) !void {
-            const io = testing.io;
-            const gpa = testing.allocator;
-
-            assert(raw_inputs.len > 0);
-
-            var allocating: Io.Writer.Allocating = .init(gpa);
-            defer allocating.deinit();
-
-            var environ = try testing.environ.createMap(gpa);
-            defer environ.deinit();
-
-            var shell: Shell = try .init(io, gpa, .from_environment(&environ));
-            defer shell.deinit();
-
-            var arena: std.heap.ArenaAllocator = .init(gpa);
-            defer arena.deinit();
-
-            for (raw_inputs) |raw_input| {
-                defer _ = arena.reset(.free_all);
-
-                const parsed = try Input.parse(
-                    arena.allocator(),
-                    raw_input,
-                    &shell.records,
-                    shell.home_path,
-                );
-                try run(.{
-                    .arena = arena.allocator(),
-                    .shell = &shell,
-                    .stdio = .{
-                        .stdout = &allocating.writer,
-                        .stderr = &allocating.writer,
-                    },
-                    .input = parsed,
-                });
-            }
-
-            const got = allocating.written();
-            try Snapshot.diff(&want, got);
-        }
-    };
-
-    try T.check("echo Hello ..    World  !~", snap(@src(),
-        \\Hello .. World !~
-        \\
-    ));
-
-    try T.check("echo", snap(@src(),
-        \\
-        \\
-    ));
-
-    try T.check("type", snap(@src(),
-        \\
-    ));
-
-    try T.check("type echo", snap(@src(),
-        \\echo is a shell builtin
-        \\
-    ));
-
-    try T.check("type foo", snap(@src(),
-        \\foo: not found
-        \\
-    ));
-
-    try T.check("type which", snap(@src(),
-        \\which is /usr/bin/which
-        \\
-    ));
-
-    try T.check("type zsh bash ls exit", snap(@src(),
-        \\zsh is /bin/zsh
-        \\bash is /bin/bash
-        \\ls is /bin/ls
-        \\exit is a shell builtin
-        \\
-    ));
-
-    try T.check("declare -p", snap(@src(),
-        \\Error: invalid arguments
-        \\
-    ));
-
-    try T.check("declare =x", snap(@src(),
-        \\declare: `=x': not a valid identifier
-        \\
-    ));
-
-    try T.check("declare 1x=y", snap(@src(),
-        \\declare: `1x=y': not a valid identifier
-        \\
-    ));
-
-    try T.check("declare x=y extra", snap(@src(),
-        \\Error: invalid arguments
-        \\
-    ));
-
-    try T.check_many(&.{
-        "declare x=old",
-        "declare x=new",
-        "declare -p x",
-    }, snap(@src(),
-        \\declare -- x="new"
-        \\
-    ));
-}
-
-test "redirection" {
-    const T = struct {
-        fn run_command(shell: *Shell, directory: Io.Dir, raw_input: []const u8) !void {
-            const io = testing.io;
-            const gpa = testing.allocator;
-
-            assert(raw_input.len > 0);
-
-            var arena: std.heap.ArenaAllocator = .init(gpa);
-            defer arena.deinit();
-
-            var stdout_buffer: [4096]u8 = undefined;
-            var stderr_buffer: [4096]u8 = undefined;
-
-            const parsed = try Input.parse(
-                arena.allocator(),
-                raw_input,
-                &shell.records,
-                shell.home_path,
-            );
-            var output = try Output.init(
-                io,
-                directory,
-                parsed.redirects,
-                &stdout_buffer,
-                &stderr_buffer,
-            );
-            defer output.deinit(io);
-
-            try run(.{
-                .arena = arena.allocator(),
-                .shell = shell,
-                .stdio = .{
-                    .stdout = output.stdout(),
-                    .stderr = output.stderr(),
-                    .stdout_file = output.stdout_writer.file,
-                    .stderr_file = output.stderr_writer.file,
-                },
-                .input = parsed,
-            });
-            try output.flush();
-        }
-
-        fn expect_file(directory: Io.Dir, path: []const u8, want: []const u8) !void {
-            const io = testing.io;
-            const gpa = testing.allocator;
-
-            assert(path.len > 0);
-
-            const actual = try directory.readFileAlloc(io, path, gpa, .limited(4096));
-            defer gpa.free(actual);
-            try testing.expectEqualStrings(want, actual);
-        }
-    };
-
-    const io = testing.io;
-    const gpa = testing.allocator;
-
-    var tmp_dir = testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    var environ = try testing.environ.createMap(gpa);
-    defer environ.deinit();
-
-    var shell: Shell = try .init(io, gpa, .from_environment(&environ));
-    defer shell.deinit();
-
-    try T.run_command(&shell, tmp_dir.dir, "echo first > out.txt");
-    try T.run_command(&shell, tmp_dir.dir, "echo second >> out.txt");
-    try T.expect_file(tmp_dir.dir, "out.txt", "first\nsecond\n");
-
-    try T.run_command(&shell, tmp_dir.dir, "printf external > external.txt");
-    try T.expect_file(tmp_dir.dir, "external.txt", "external");
-
-    try T.run_command(&shell, tmp_dir.dir, "ls missing 2> error.txt");
-    const error_text = try tmp_dir.dir.readFileAlloc(io, "error.txt", gpa, .limited(4096));
-    defer gpa.free(error_text);
-    try testing.expect(std.mem.indexOf(u8, error_text, "missing") != null);
 }

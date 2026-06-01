@@ -26,6 +26,7 @@ pub const Input = struct {
     command: Command,
     args: []const []const u8,
     redirects: ?Redirect,
+    background: bool = false,
 
     pub const Command = union(enum) {
         builtin: builtins.Command,
@@ -199,6 +200,12 @@ pub const Input = struct {
         assert(words.items.len > 0);
         assert(words.items[0].len > 0);
 
+        const is_background: bool = bck: {
+            if (mem.eql(u8, words.getLast(), "&")) {
+                _ = words.pop();
+                break :bck true;
+            } else break :bck false;
+        };
         const redirect_result = try redirect(arena, words.items[1..]);
 
         const command: Command = if (builtins.Command.parse(
@@ -212,6 +219,7 @@ pub const Input = struct {
             .command = command,
             .args = redirect_result.args,
             .redirects = redirect_result.redirect,
+            .background = is_background,
         };
     }
 

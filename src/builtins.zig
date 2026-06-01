@@ -11,6 +11,8 @@ const StdioContext = cmdline.StdioContext;
 const CommandContext = cmdline.CommandContext;
 const maybe = @import("stdx.zig").maybe;
 const Shell = @import("Shell.zig");
+const Job = Shell.Job;
+const IdGenerator = Job.IdGenerator;
 
 pub const Command = enum {
     echo,
@@ -19,6 +21,7 @@ pub const Command = enum {
     pwd,
     history,
     declare,
+    jobs,
     exit,
 
     pub fn parse(command: []const u8) ?Command {
@@ -30,14 +33,16 @@ pub fn run(context: CommandContext) !void {
     maybe(context.input.args.len > 0);
     const args = context.input.args;
     const stdio = context.stdio;
+    const shell = context.shell;
     const gpa = context.shell.gpa;
     switch (context.input.command.builtin) {
         .echo => try echo(args, stdio),
-        .type => try @"type"(context.shell, args, stdio),
-        .cd => try cd(context.shell, args, stdio),
-        .pwd => try pwd(context.shell.cwd, stdio),
+        .type => try @"type"(shell, args, stdio),
+        .cd => try cd(shell, args, stdio),
+        .pwd => try pwd(shell.cwd, stdio),
         .history => try history(args, stdio),
-        .declare => try declare(gpa, &context.shell.records, args, stdio),
+        .declare => try declare(gpa, &shell.records, args, stdio),
+        .jobs => try jobs(gpa, &shell.jobs, &shell.job_id_generator, stdio),
         .exit => std.process.exit(0),
     }
 }
@@ -209,4 +214,55 @@ pub fn declare(
     const key = try gpa.dupe(u8, key_source);
     errdefer gpa.free(key);
     try records.put(key, value);
+}
+
+pub fn jobs(
+    gpa: Allocator,
+    jobs_table: *std.array_hash_map.Auto(u32, Job),
+    id_genrator: *IdGenerator,
+    stdio: StdioContext,
+) !void {
+    const count = jobs_table.values().len;
+    var done_job_ids: std.ArrayList(u32) = .empty;
+    defer done_job_ids.deinit(gpa);
+    for (jobs_table.values(), 0..) |*job, i| {
+        if (std.c.waitpid(job.PID, null, std.c.W.NOHANG) != 0) {
+            job.status = .Done;
+        }
+
+        const job_id = job.job_id;
+        const marker = mk: {
+            var marker_tmp: []const u8 = undefined;
+            if (i == count - 1) {
+                marker_tmp = "+";
+            } else if (i == count - 2) {
+                marker_tmp = "-";
+            } else marker_tmp = "";
+            break :mk marker_tmp;
+        };
+        const status = @tagName(job.status);
+        const command = if (job.status == .Done)
+            mem.trimEnd(u8, job.command_string, "&")
+        else
+            job.command_string;
+
+        try stdio.stdout.print("[{d}]{s: <2} {s: <24}{s}\n", .{
+            job_id,
+            marker,
+            status,
+            command,
+        });
+
+        if (job.status == .Done) {
+            try done_job_ids.append(gpa, job.job_id);
+        }
+    }
+
+    for (done_job_ids.items) |job_id| {
+        try id_genrator.remove(gpa, job_id);
+        if (jobs_table.get(job_id)) |job| {
+            gpa.free(job.command_string);
+        }
+        _ = jobs_table.fetchOrderedRemove(job_id);
+    }
 }

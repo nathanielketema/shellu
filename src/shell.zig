@@ -9,6 +9,8 @@ path_dirs: []SearchDir,
 home_path: []const u8,
 records: std.StringHashMap([]const u8),
 cwd: [:0]const u8,
+jobs: std.array_hash_map.Auto(u32, Job), // job_id: Job
+job_id_generator: Job.IdGenerator,
 io: Io,
 gpa: Allocator,
 
@@ -27,6 +29,37 @@ pub const Config = struct {
             .home_env = environment.get("HOME") orelse "/",
         };
     }
+};
+
+pub const Job = struct {
+    job_id: u32,
+    PID: i32,
+    status: enum { Running, Done },
+    command_string: []const u8,
+
+    pub const IdGenerator = struct {
+        last: u32 = 0,
+        free: std.PriorityQueue(u32, void, struct {
+            fn less_than(_: void, a: u32, b: u32) std.math.Order {
+                return std.math.order(a, b);
+            }
+        }.less_than) = .empty,
+
+        pub fn new(id_generator: *IdGenerator) u32 {
+            return id_generator.free.pop() orelse blk: {
+                id_generator.last += 1;
+                break :blk id_generator.last;
+            };
+        }
+
+        pub fn remove(id_generator: *IdGenerator, gpa: Allocator, id: u32) !void {
+            try id_generator.free.push(gpa, id);
+        }
+
+        pub fn deinit(id_generator: *IdGenerator, gpa: Allocator) void {
+            id_generator.free.deinit(gpa);
+        }
+    };
 };
 
 pub fn init(io: Io, gpa: Allocator, config: Config) !Shell {
@@ -51,6 +84,8 @@ pub fn init(io: Io, gpa: Allocator, config: Config) !Shell {
         .home_path = config.home_env,
         .records = .init(gpa),
         .cwd = try std.process.currentPathAlloc(io, gpa),
+        .jobs = .empty,
+        .job_id_generator = .{},
         .io = io,
         .gpa = gpa,
     };
@@ -65,6 +100,9 @@ pub fn deinit(shell: *Shell) void {
     var values = shell.records.valueIterator();
     while (values.next()) |value| shell.gpa.free(value.*);
     shell.records.deinit();
+
+    shell.jobs.deinit(shell.gpa);
+    shell.job_id_generator.deinit(shell.gpa);
 
     for (shell.path_dirs) |path_dir| {
         path_dir.dir.close(shell.io);
