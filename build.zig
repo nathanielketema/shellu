@@ -4,24 +4,32 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const readline = b.addTranslateC(.{
+    const readline = b.dependency("readline", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const translate_readline = b.addTranslateC(.{
         .root_source_file = b.path("include/readline.h"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    readline.linkSystemLibrary("readline", .{});
+    translate_readline.addIncludePath(readline.path("."));
+
+    const mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "readline", .module = translate_readline.createModule() },
+        },
+    });
+    mod.linkLibrary(readline.artifact("readline"));
 
     const exe = b.addExecutable(.{
         .name = "shellu",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "readline", .module = readline.createModule() },
-            },
-        }),
+        .root_module = mod,
     });
     b.installArtifact(exe);
 

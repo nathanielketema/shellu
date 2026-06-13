@@ -2,8 +2,13 @@
     .name = .shellu,
     .version = "0.0.0",
     .fingerprint = 0x3124762d19affd36,
-    .minimum_zig_version = "0.17.0-dev.298+ad1b746e2",
-    .dependencies = .{},
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .readline = .{
+            .url = "git+https://github.com/nathanielketema/readline.git#c439c4f2d8cb62a40aca7d216f091be72333ad1c",
+            .hash = "readline-8.3.0-sRzzMQWeAAAgK0QGQX7-ptE-_Jkbdd0iHmOi244EQI8g",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
