@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const builtins = @import("builtins.zig");
-const Shell = @import("Shell.zig");
+const Shell = @import("shell.zig").Shell;
 
 pub const StdioContext = struct {
     stdout: *Io.Writer,
@@ -17,16 +17,16 @@ pub const StdioContext = struct {
 
 pub const CommandContext = struct {
     arena: Allocator,
+    input: Input,
     shell: *Shell,
     stdio: StdioContext,
-    input: Input,
 };
 
 pub const Input = struct {
-    command: Command,
     args: []const []const u8,
-    redirects: ?Redirect,
     background: bool = false,
+    command: Command,
+    redirects: ?Redirect,
 
     pub const Command = union(enum) {
         builtin: builtins.Command,
@@ -34,28 +34,28 @@ pub const Input = struct {
     };
 
     pub const Redirect = struct {
-        output: enum { stdout, stderr },
         mode: enum { truncate, append },
         file: []const u8,
+        output: enum { stdout, stderr },
     };
 
     pub const State = enum {
-        seeking,
-        parsing,
-        single,
         double,
+        single,
+        parsing,
+        seeking,
         expanding,
     };
 
     pub const Token = enum(u8) {
         space = ' ',
         tilde = '~',
-        single_quote = '\'',
-        double_quote = '"',
         dollar = '$',
+        back_slash = '\\',
         left_curly = '{',
         right_curly = '}',
-        back_slash = '\\',
+        single_quote = '\'',
+        double_quote = '"',
         end_of_file,
         _,
     };

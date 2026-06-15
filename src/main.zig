@@ -11,9 +11,7 @@ const Input = cmdline.Input;
 const Output = cmdline.Output;
 const CommandContext = cmdline.CommandContext;
 const external = @import("external.zig");
-const Shell = @import("Shell.zig");
-const Snapshot = @import("stdx.zig").Snapshot;
-const snap = Snapshot.snap;
+const Shell = @import("shell.zig").Shell;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -23,13 +21,12 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stderr_buffer: [4096]u8 = undefined;
 
-    var shell: Shell = try .init(io, gpa, .from_environment(init.environ_map));
+    var shell: Shell = try .init(io, gpa, .from_environment(init.environ_map), init.environ_map);
     defer shell.deinit();
+    shell.activate();
 
-    _ = readline.rl_bind_key('\t', readline.rl_complete);
-    readline.using_history();
     while (true) {
-        defer _ = init.arena.reset(.free_all); // reset after each command
+        defer _ = init.arena.reset(.free_all); // Reset after each command
 
         const raw_input_c_string: [*c]u8 = readline.readline("$ ") orelse return;
         defer std.c.free(raw_input_c_string);
@@ -59,7 +56,16 @@ pub fn main(init: std.process.Init) !void {
         );
         defer output.deinit(io);
 
-        try run(.{
+        // Ideal refactor:
+        // var shell: Shell = .init();
+        // defer shell.deinit();
+        // while (true) {
+        //     const command: Command = cmdline.parse(raw_input);
+        //     shell.run(command);
+        //     shell.reap_jobs();
+        //     shell.flush();
+        // }
+        run(.{
             .arena = arena,
             .shell = &shell,
             .stdio = .{
@@ -69,49 +75,12 @@ pub fn main(init: std.process.Init) !void {
                 .stderr_file = output.stderr_writer.file,
             },
             .input = parsed,
-        });
+        }) catch |err| switch (err) {
+            error.Exit => break,
+            else => return err,
+        };
 
-        { // Reap a job
-            const count = shell.jobs.values().len;
-            var done_job_ids: std.ArrayList(u32) = .empty;
-            defer done_job_ids.deinit(gpa);
-            for (shell.jobs.values(), 0..) |*job, i| {
-                if (std.c.waitpid(job.PID, null, std.c.W.NOHANG) != 0) {
-                    job.status = .Done;
-                }
-                if (job.status == .Running) continue;
-
-                try done_job_ids.append(gpa, job.job_id);
-                const job_id = job.job_id;
-                const marker = mk: {
-                    var marker_tmp: []const u8 = undefined;
-                    if (i == count - 1) {
-                        marker_tmp = "+";
-                    } else if (i == count - 2) {
-                        marker_tmp = "-";
-                    } else marker_tmp = "";
-                    break :mk marker_tmp;
-                };
-                const status = @tagName(job.status);
-                const command = std.mem.trimEnd(u8, job.command_string, "&");
-
-                try output.stdout().print("[{d}]{s: <2} {s: <24}{s}\n", .{
-                    job_id,
-                    marker,
-                    status,
-                    command,
-                });
-            }
-
-            for (done_job_ids.items) |job_id| {
-                if (shell.jobs.get(job_id)) |job| {
-                    try shell.job_id_generator.remove(gpa, job_id);
-                    gpa.free(job.command_string);
-                }
-                _ = shell.jobs.fetchOrderedRemove(job_id);
-            }
-        }
-
+        try shell.reap_job(output.stdout());
         try output.flush();
     }
 }

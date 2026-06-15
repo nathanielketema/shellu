@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const readline_artifact = readline.artifact("readline");
 
     const translate_readline = b.addTranslateC(.{
         .root_source_file = b.path("include/readline.h"),
@@ -15,7 +16,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    translate_readline.addIncludePath(readline.path("."));
+    translate_readline.addIncludePath(readline_artifact.getEmittedIncludeTree());
 
     const mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -24,8 +25,20 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "readline", .module = translate_readline.createModule() },
         },
+        .link_libc = true,
     });
-    mod.linkLibrary(readline.artifact("readline"));
+    mod.linkLibrary(readline_artifact);
+
+    const mod2 = b.createModule(.{
+        .root_source_file = b.path("src/main2.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "readline", .module = translate_readline.createModule() },
+        },
+        .link_libc = true,
+    });
+    mod2.linkLibrary(readline_artifact);
 
     const exe = b.addExecutable(.{
         .name = "shellu",
@@ -33,15 +46,23 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
-    const run_step = b.step("run", "Run shellu");
+    const exe2 = b.addExecutable(.{
+        .name = "shellu2",
+        .root_module = mod2,
+    });
+    b.installArtifact(exe2);
+
+    const run_step = b.step("run1", "Run shellu");
     const run_cmd = b.addRunArtifact(exe);
+
+    const run_step2 = b.step("run", "Run shellu 2");
+    const run_cmd2 = b.addRunArtifact(exe2);
 
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_step2.dependOn(&run_cmd2.step);
+    run_cmd2.step.dependOn(b.getInstallStep());
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,

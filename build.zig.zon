@@ -1,12 +1,12 @@
 .{
     .name = .shellu,
     .version = "0.0.0",
-    .fingerprint = 0x3124762d19affd36,
+    .fingerprint = 0x3124762d19affd36, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .readline = .{
-            .url = "git+https://github.com/nathanielketema/readline.git#c439c4f2d8cb62a40aca7d216f091be72333ad1c",
-            .hash = "readline-8.3.0-sRzzMQWeAAAgK0QGQX7-ptE-_Jkbdd0iHmOi244EQI8g",
+            .url = "git+https://github.com/nathanielketema/readline.git#8a8830827946e5116bca3041619995fa0b810c0c",
+            .hash = "readline-8.3.0-sRzzMVShAADUUh5lu7YBh6njr_LP5fIFyQuuKiY8QIlY",
         },
     },
     .paths = .{

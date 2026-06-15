@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const cmdline = @import("cmd_line.zig");
 const StdioContext = cmdline.StdioContext;
 const CommandContext = cmdline.CommandContext;
-const Shell = @import("Shell.zig");
+const Shell = @import("shell.zig").Shell;
 
 pub fn run(context: CommandContext) !void {
     const arena = context.arena;
@@ -53,12 +53,12 @@ pub fn run(context: CommandContext) !void {
         return;
     }
 
-    const id = shell.job_id_generator.new();
+    const id = shell.id_generator.new();
     const pid = child.id.?;
     try argv.append(arena, "&");
     try shell.jobs.put(shell.gpa, id, .{
-        .job_id = id,
-        .PID = pid,
+        .id = id,
+        .pid = pid,
         .status = .Running,
         .command_string = try std.mem.join(shell.gpa, " ", argv.items),
     });
