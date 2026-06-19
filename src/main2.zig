@@ -5,31 +5,31 @@ const readline = @import("readline");
 
 const cmdline = @import("cmdline.zig");
 const Pipeline = cmdline.Pipeline;
-const shl = @import("shell2.zig");
+const Shell = @import("shell2.zig").Shell;
 
 pub fn main(init: std.process.Init) !void {
-    var shell: shl.Shell = .init(init.io, init.gpa, init.environ_map);
+    var shell: Shell = .init(init.io, init.gpa, init.environ_map);
     defer shell.deinit();
 
     while (true) {
+        const raw_input: [*c]u8 = readline.readline("$ ") orelse continue;
+        defer std.c.free(raw_input);
+        _ = readline.add_history(raw_input);
+
         // Empty input is ignored
-        const input: []const u8 = get_input() orelse continue;
+        const input: [:0]const u8 = std.mem.span(raw_input);
         if (input.len == 0) continue;
 
-        const pipeline: Pipeline = cmdline.parse(init.arena.allocator(), input);
+        const pipeline = shell.parse(init.arena.allocator(), input) catch |err| {
+            switch (err) {
+                error.ParseFailed => return,
+                else => return err,
+            }
+        };
         defer _ = init.arena.reset(.free_all);
-        _ = pipeline;
 
-        //shell.run(pipeline);
+        try shell.run(pipeline);
         //shell.reap_jobs();
         try shell.flush();
     }
-}
-
-pub fn get_input() ?[]const u8 {
-    const input: [*c]u8 = readline.readline("$ ") orelse return null;
-    defer std.c.free(input);
-    assert(input != null);
-    _ = readline.add_history(input);
-    return std.mem.span(input);
 }

@@ -16,9 +16,9 @@ pub const Token = struct {
         tilde,
         literal,
         variable,
+        redirect_in,
         redirect_append,
         redirect_truncate,
-        redirect_in,
 
         pub fn lexeme(tag: Tag) ?[]const u8 {
             return switch (tag) {
@@ -48,11 +48,11 @@ pub const Tokenizer = struct {
         start,
         invalid,
         literal,
+        redirect,
+        variable,
         double_quote,
         single_quote,
-        variable,
         variable_braced,
-        redirect_out,
     };
 
     /// An eol token will always be returned at the end.
@@ -103,7 +103,14 @@ pub const Tokenizer = struct {
                     return result;
                 },
                 '>' => {
-                    continue :state .redirect_out;
+                    continue :state .redirect;
+                },
+                '1', '2' => {
+                    if (self.buffer[self.index + 1] == '>') {
+                        self.index += 1;
+                        continue :state .start;
+                    }
+                    continue :state .literal;
                 },
                 '$' => {
                     self.index += 1;
@@ -189,6 +196,7 @@ pub const Tokenizer = struct {
                 },
                 0, ' ', '\t', '|', '>', '<', '"', '\'' => {
                     result.tag = .variable;
+                    result.loc.start += 1;
                     result.loc.end = self.index;
                     return result;
                 },
@@ -202,12 +210,13 @@ pub const Tokenizer = struct {
                 '}' => {
                     self.index += 1;
                     result.tag = .variable;
-                    result.loc.end = self.index;
+                    result.loc.start += 2;
+                    result.loc.end = self.index - 1;
                     return result;
                 },
                 else => continue :state .invalid,
             },
-            .redirect_out => {
+            .redirect => {
                 self.index += 1;
                 if (self.buffer[self.index] == '>') {
                     self.index += 1;
@@ -315,4 +324,29 @@ test "tokenizer" {
         .literal,
         .literal,
     });
+}
+
+test "token loc" {
+    var tokenizer: Tokenizer = .init("echo >> > 2>> 1>");
+    var token = tokenizer.next();
+    while (token.tag != .eol) {
+        defer token = tokenizer.next();
+        std.debug.print("{s:>8}: [{d:<2}, {d:>2}]\n", .{
+            @tagName(token.tag),
+            token.loc.start,
+            token.loc.end,
+        });
+    }
+    for (0..tokenizer.buffer.len) |i| {
+        std.debug.print("{d} ", .{i});
+    }
+    std.debug.print("\n", .{});
+    for (tokenizer.buffer, 0..) |char, i| {
+        if (i < 10) {
+            std.debug.print("{c} ", .{char});
+        } else {
+            std.debug.print("{c}  ", .{char});
+        }
+    }
+    std.debug.print("\n", .{});
 }
