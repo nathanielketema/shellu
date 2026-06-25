@@ -1,4 +1,4 @@
-.zig-cache/
+.DS_Store
 zig-out/
 zig-pkg/
-.DS_Store
+.zig-cache/

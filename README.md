@@ -1,6 +1,6 @@
 # Shellu
 
-Shell in zig.
+A simple shell implemented in zig for educational purposes.
 
 ## Start
 
@@ -15,7 +15,23 @@ cd src
 zig build test
 ```
 
-## System dependencies
+You only need [zig](https://ziglang.org/) 0.16.0 to be able to run it.
 
-- [zig](https://ziglang.org/)
-- [readline](https://tiswww.case.edu/php/chet/readline/rltop.html)
+## Implemented features
+
+- [x] Background jobs
+- [x] Command completion
+- [x] Command History
+- [x] Redirection
+- [x] Pipes
+- [x] Variables
+- [x] Builtins
+  - [x] cd
+  - [x] pwd
+  - [x] echo
+  - [x] jobs
+  - [x] type
+  - [x] declare
+  - [x] history
+  - [x] exit
+- [ ] Helpful errors

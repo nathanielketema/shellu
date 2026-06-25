@@ -1,66 +1,55 @@
 const std = @import("std");
-const Io = std.Io;
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const Io = std.Io;
 
-const cmdline = @import("cmd_line.zig");
-const StdioContext = cmdline.StdioContext;
-const CommandContext = cmdline.CommandContext;
 const Shell = @import("shell.zig").Shell;
+const CommandContext = Shell.CommandContext;
 
-pub fn run(context: CommandContext) !void {
-    const arena = context.arena;
-    const shell = context.shell;
-    const input = context.input;
-    const stdio = context.stdio;
-    const command = input.command.external;
-    assert(command.len > 0);
+pub fn run(shell: *Shell, ctx: *CommandContext, background: bool) !void {
+    const arena = shell.arena.allocator();
 
-    // Check if command is in path
-    for (shell.path_dirs) |path_dir| {
-        path_dir.dir.access(shell.io, command, .{
-            .execute = true,
-        }) catch continue;
+    const env_path = shell.env.get("PATH") orelse {
+        try ctx.out.interface.print("shellu: PATH env not defined.\n", .{});
+        return error.RunFailed;
+    };
+    var it = std.mem.tokenizeScalar(u8, env_path, Io.Dir.path.delimiter_posix);
+    while (it.next()) |path_dir| {
+        Io.Dir.access(.cwd(), shell.io, path_dir, .{ .execute = true }) catch continue;
         break;
     } else {
-        try stdio.stderr.print("{s}: command not found\n", .{command});
-        return;
+        try ctx.err.interface.print("<{s}>: command not found.\n", .{ctx.command.program});
+        return error.RunFailed;
     }
 
+    // Join program name and commandline args
     var argv: std.ArrayList([]const u8) = .empty;
-    try argv.append(arena, command);
-    for (input.args) |arg| {
-        try argv.append(arena, arg);
-    }
-    assert(argv.items.len > 0);
-    assert(argv.items.len == input.args.len + 1);
+    try argv.append(arena, ctx.command.program);
+    for (ctx.command.args) |arg| try argv.append(arena, arg);
+    assert(argv.items.len == ctx.command.args.len + 1);
 
-    var child = try std.process.spawn(shell.io, .{
+    var child = std.process.spawn(shell.io, .{
         .argv = argv.items,
-        .stdout = if (stdio.stdout_file) |file|
-            .{ .file = file }
-        else
-            .inherit,
-        .stderr = if (stdio.stderr_file) |file|
-            .{ .file = file }
-        else
-            .inherit,
-    });
-    errdefer child.kill(shell.io);
+        .stdin = if (ctx.in_file) |file| .{ .file = file } else .inherit,
+        .stdout = if (ctx.out_file) |file| .{ .file = file } else .inherit,
+        .stderr = if (ctx.err_file) |file| .{ .file = file } else .inherit,
+    }) catch {
+        try ctx.err.interface.print("<{s}>: command not found.\n", .{ctx.command.program});
+        return error.RunFailed;
+    };
 
-    if (!input.background) {
+    if (!background) {
         _ = try child.wait(shell.io);
         return;
     }
 
-    const id = shell.id_generator.new();
+    const id = shell.id_generator.create();
     const pid = child.id.?;
     try argv.append(arena, "&");
-    try shell.jobs.put(shell.gpa, id, .{
+    try shell.jobs.put(arena, id, .{
         .id = id,
         .pid = pid,
         .status = .Running,
-        .command_string = try std.mem.join(shell.gpa, " ", argv.items),
+        .cmd_text = try std.mem.join(shell.gpa, " ", argv.items),
     });
-    try stdio.stdout.print("[{d}] {d}\n", .{ id, pid });
+    try ctx.out.interface.print("[{d}] {d}\n", .{ @intFromEnum(id), pid });
 }

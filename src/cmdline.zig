@@ -3,8 +3,8 @@ const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
-const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Token = @import("tokenizer.zig").Token;
+const Tokenizer = @import("tokenizer.zig").Tokenizer;
 
 pub const Pipeline = struct {
     /// This always contains atleast one command
@@ -41,15 +41,20 @@ pub const Errors = struct {
     count: usize = 0,
 
     pub fn add_invalid_program(errors: *Errors, tag: Token.Tag) void {
-        errors.emit("shellu: Expected a string, but found a {s}\n", .{@tagName(tag)});
+        errors.emit("shellu: expected a string, got {s}.\n", .{@tagName(tag)});
     }
 
-    pub fn add_invalid_token(errors: *Errors) void {
-        errors.emit("shellu: Invalid token\n", .{});
+    pub fn add_invalid_token(errors: *Errors, invalid_token: []const u8) void {
+        errors.emit("shellu: <{s}> invalid token.\n", .{invalid_token});
+    }
+
+    pub fn add_no_file_provided(errors: *Errors) void {
+        errors.emit("shellu: no file provided for redirection.\n", .{});
     }
 
     pub fn emit(errors: *Errors, comptime fmt: []const u8, args: anytype) void {
         comptime assert(fmt[fmt.len - 1] == '\n');
+        comptime assert(fmt[fmt.len - 2] == '.');
         errors.count += 1;
         std.debug.print(fmt, args);
     }
@@ -95,18 +100,11 @@ pub const Parser = struct {
             const command = try parser.parse_command();
             try commands.append(parser.arena, command);
         }
-
-        for (commands.items) |command| {
-            std.debug.print("prgram name: {s}\n", .{command.program});
-            std.debug.print("args:\n", .{});
-            for (command.args) |arg| std.debug.print("  - {s}\n", .{arg});
-            std.debug.print("redirects:\n", .{});
-            for (command.redirects) |redirect| {
-                std.debug.print("  - {s} -> {s} -> {s}\n", .{
-                    redirect.file,
-                    @tagName(redirect.kind),
-                    if (redirect.dest) |d| @tagName(d) else "",
-                });
+        assert(commands.items.len > 0);
+        for (commands.items) |cmd| {
+            assert(cmd.program.len > 0);
+            if (cmd.redirects.len > 0) {
+                for (cmd.redirects) |rd| assert(rd.file.len > 0);
             }
         }
         return .{ .commands = commands.items };
@@ -127,7 +125,7 @@ pub const Parser = struct {
             const token = parser.tokens.items[parser.token_index];
             switch (token.tag) {
                 .invalid => {
-                    parser.errors.add_invalid_token();
+                    parser.errors.add_invalid_token(parser.source[token.loc.start..token.loc.end]);
                     return error.ParseFailed;
                 },
                 .eol, .pipe => {
@@ -181,7 +179,7 @@ pub const Parser = struct {
 
                     const next = parser.tokens.items[parser.token_index + 1];
                     if (next.tag != .literal) {
-                        // parser.errors.
+                        parser.errors.add_no_file_provided();
                         return error.ParseFailed;
                     }
                     const file = parser.source[next.loc.start..next.loc.end];
@@ -189,10 +187,7 @@ pub const Parser = struct {
                         .redirect_in => .in,
                         .redirect_append => .append,
                         .redirect_truncate => .truncate,
-                        else => {
-                            // parser.errors.
-                            return error.ParseFailed;
-                        },
+                        else => unreachable,
                     };
                     const dest: ?Dest = dst: {
                         if (kind == .in) break :dst null;

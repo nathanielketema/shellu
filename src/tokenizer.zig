@@ -161,9 +161,10 @@ pub const Tokenizer = struct {
             .double_quote => switch (self.buffer[self.index]) {
                 0 => continue :state .invalid,
                 '"' => {
-                    self.index += 1;
                     result.tag = .literal;
+                    result.loc.start += 1;
                     result.loc.end = self.index;
+                    self.index += 1;
                     return result;
                 },
                 '\\' => {
@@ -179,9 +180,10 @@ pub const Tokenizer = struct {
             .single_quote => switch (self.buffer[self.index]) {
                 0 => continue :state .invalid,
                 '\'' => {
-                    self.index += 1;
                     result.tag = .literal;
+                    result.loc.start += 1;
                     result.loc.end = self.index;
+                    self.index += 1;
                     return result;
                 },
                 else => {
@@ -208,10 +210,10 @@ pub const Tokenizer = struct {
                     continue :state .variable_braced;
                 },
                 '}' => {
-                    self.index += 1;
                     result.tag = .variable;
                     result.loc.start += 2;
-                    result.loc.end = self.index - 1;
+                    result.loc.end = self.index;
+                    self.index += 1;
                     return result;
                 },
                 else => continue :state .invalid,
