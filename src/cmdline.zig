@@ -36,7 +36,6 @@ pub const Pipeline = struct {
     };
 };
 
-// TODO: pretty print error msg. Use fish as a guide
 pub const Errors = struct {
     count: usize = 0,
 

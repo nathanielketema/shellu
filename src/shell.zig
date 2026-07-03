@@ -15,10 +15,6 @@ const Pipeline = cmdline.Pipeline;
 const Command = cmdline.Pipeline.Command;
 const external = @import("external.zig");
 
-pub const Errors = struct {
-    count: usize = 0,
-};
-
 pub const Job = struct {
     id: Id,
     pid: i32,
@@ -70,7 +66,6 @@ pub const Shell = struct {
     path_home: []const u8,
     jobs: std.array_hash_map.Auto(Job.Id, Job),
     id_generator: Job.Id.Generator,
-    errors: ArrayList(Errors),
     history_file: []const u8,
     history_offset: usize,
 
@@ -99,7 +94,6 @@ pub const Shell = struct {
             .env = env,
             .jobs = .empty,
             .id_generator = .{},
-            .errors = .empty,
             .variables = .init(gpa),
             .path_home = home_path,
             .history_file = history_file,
@@ -115,6 +109,12 @@ pub const Shell = struct {
             var val_it = shell.variables.valueIterator();
             while (val_it.next()) |val| shell.gpa.free(val.*);
             shell.variables.deinit();
+        }
+        {
+            shell.gpa.free(shell.jobs.keys());
+            shell.gpa.free(shell.jobs.values());
+            shell.jobs.deinit(shell.gpa);
+            shell.id_generator.deinit(shell.gpa);
         }
         shell.gpa.free(shell.cwd);
         shell.gpa.free(shell.history_file);
@@ -283,7 +283,7 @@ pub const Shell = struct {
         for (0..cmds_count - 1) |_| {
             var fds: [2]std.os.linux.fd_t = undefined;
             const rc = std.c.pipe(&fds);
-            if (rc != 0) return error.RunFailed;
+            if (rc != 0) return error.Reported;
             try pipes.append(shell.arena.allocator(), .{
                 .read = Io.File{ .handle = fds[0], .flags = .{ .nonblocking = false } },
                 .write = Io.File{ .handle = fds[1], .flags = .{ .nonblocking = false } },
@@ -324,7 +324,7 @@ pub const Shell = struct {
                         "shellu: invalid redirection target, {s}.\n",
                         .{redirect.file},
                     );
-                    return error.RunFailed;
+                    return error.Reported;
                 };
 
                 const dest = redirect.dest orelse {
@@ -339,9 +339,9 @@ pub const Shell = struct {
                         ctx.out_file = file;
                         if (redirect.kind == .append) {
                             const stat = file.stat(shell.io) catch {
-                                return error.RunFailed;
+                                return error.Reported;
                             };
-                            ctx.out.seekTo(stat.size) catch return error.RunFailed;
+                            ctx.out.seekTo(stat.size) catch return error.Reported;
                         }
                     },
                     .stderr => {
@@ -349,9 +349,9 @@ pub const Shell = struct {
                         ctx.err_file = file;
                         if (redirect.kind == .append) {
                             const stat = file.stat(shell.io) catch {
-                                return error.RunFailed;
+                                return error.Reported;
                             };
-                            ctx.err.seekTo(stat.size) catch return error.RunFailed;
+                            ctx.err.seekTo(stat.size) catch return error.Reported;
                         }
                     },
                 }

@@ -30,7 +30,7 @@ pub fn main(init: std.process.Init) !void {
 
         shell.run(pipeline) catch |err| {
             switch (err) {
-                error.RunFailed => continue,
+                error.Reported => continue,
                 error.Exit => return,
                 else => |e| return e,
             }

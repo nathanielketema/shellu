@@ -9,14 +9,7 @@ purposes.
 zig build run
 ```
 
-Test could be run as:
-
-```console
-cd src
-zig build test
-```
-
-You only need zig 0.16.0 to be able to run it.
+You only need zig 0.16.0 in order to run it.
 
 ## Implemented features
 
@@ -35,4 +28,4 @@ You only need zig 0.16.0 to be able to run it.
   - [x] declare
   - [x] history
   - [x] exit
-- [ ] Helpful errors
+- [x] Helpful errors

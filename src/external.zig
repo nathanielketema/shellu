@@ -9,8 +9,8 @@ pub fn run(shell: *Shell, ctx: *CommandContext, background: bool) !void {
     const arena = shell.arena.allocator();
 
     const env_path = shell.env.get("PATH") orelse {
-        try ctx.out.interface.print("shellu: PATH env not defined.\n", .{});
-        return error.RunFailed;
+        try ctx.err.interface.print("shellu: PATH env not defined.\n", .{});
+        return error.Reported;
     };
     var it = std.mem.tokenizeScalar(u8, env_path, Io.Dir.path.delimiter_posix);
     while (it.next()) |path_dir| {
@@ -18,7 +18,7 @@ pub fn run(shell: *Shell, ctx: *CommandContext, background: bool) !void {
         break;
     } else {
         try ctx.err.interface.print("<{s}>: command not found.\n", .{ctx.command.program});
-        return error.RunFailed;
+        return error.Reported;
     }
 
     // Join program name and commandline args
@@ -34,7 +34,7 @@ pub fn run(shell: *Shell, ctx: *CommandContext, background: bool) !void {
         .stderr = if (ctx.err_file) |file| .{ .file = file } else .inherit,
     }) catch {
         try ctx.err.interface.print("<{s}>: command not found.\n", .{ctx.command.program});
-        return error.RunFailed;
+        return error.Reported;
     };
 
     if (!background) {

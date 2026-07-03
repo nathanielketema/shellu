@@ -38,7 +38,7 @@ pub fn run(shell: *Shell, ctx: *CommandContext) !void {
 }
 
 pub const errors = struct {
-    const tag = error{ RunFailed, Exit };
+    const tag = error{ Reported, Exit };
 
     pub fn add_too_many_arguments(
         writer: *Io.Writer,
@@ -131,7 +131,7 @@ pub fn @"type"(shell: *Shell, ctx: *CommandContext) !void {
 
         const env_path = shell.env.get("PATH") orelse {
             try errors.add_type_path_env_not_available(&ctx.err.interface);
-            return errors.tag.RunFailed;
+            return errors.tag.Reported;
         };
         var it = std.mem.tokenizeScalar(u8, env_path, Io.Dir.path.delimiter_posix);
         while (it.next()) |path_dir| {
@@ -149,7 +149,7 @@ pub fn pwd(shell: *Shell, ctx: *CommandContext) !void {
     const args = ctx.command.args;
     if (args.len > 0) {
         try errors.add_too_many_arguments(&ctx.err.interface, ctx.command.program, 0, args.len);
-        return errors.tag.RunFailed;
+        return errors.tag.Reported;
     }
     try ctx.out.interface.print("{s}\n", .{shell.cwd});
 }
@@ -158,7 +158,7 @@ pub fn cd(shell: *Shell, ctx: *CommandContext) !void {
     const args = ctx.command.args;
     if (args.len > 1) {
         try errors.add_too_many_arguments(&ctx.err.interface, ctx.command.program, 1, args.len);
-        return errors.tag.RunFailed;
+        return errors.tag.Reported;
     }
 
     const directory = if (args.len == 0) shell.path_home else args[0];
@@ -166,7 +166,7 @@ pub fn cd(shell: *Shell, ctx: *CommandContext) !void {
 
     Io.Threaded.chdir(directory) catch {
         try errors.add_cd_dir_does_not_exist(&ctx.err.interface, directory);
-        return errors.tag.RunFailed;
+        return errors.tag.Reported;
     };
 
     try shell.cwd_update();
@@ -197,7 +197,7 @@ pub fn declare(shell: *Shell, ctx: *CommandContext) !void {
                     std.mem.containsAtLeastScalar(u8, cut.@"0", 1, '-'))
                 {
                     try errors.add_declare_invalid_identifier(&ctx.err.interface, cut.@"0");
-                    return errors.tag.RunFailed;
+                    return errors.tag.Reported;
                 }
                 name_tmp = cut.@"0";
                 value_tmp = cut.@"1";
@@ -213,17 +213,17 @@ pub fn declare(shell: *Shell, ctx: *CommandContext) !void {
             if (std.mem.eql(u8, option, "-p")) {
                 const value = shell.variables.get(name) orelse {
                     try errors.add_declare_variable_not_found(&ctx.err.interface, name);
-                    return errors.tag.RunFailed;
+                    return errors.tag.Reported;
                 };
                 try ctx.out.interface.print("declare: {s}='{s}'\n", .{ name, value });
             } else {
                 try errors.add_declare_bad_option(&ctx.err.interface, option);
-                return errors.tag.RunFailed;
+                return errors.tag.Reported;
             }
         },
         else => {
             try errors.add_too_many_arguments(&ctx.err.interface, ctx.command.program, 2, args.len);
-            return errors.tag.RunFailed;
+            return errors.tag.Reported;
         },
     }
 }
@@ -243,19 +243,19 @@ pub fn history(shell: *Shell, ctx: *CommandContext) !void {
 
             const limit = std.fmt.parseInt(u8, limit_text, 10) catch |err| {
                 try errors.add_history_limit_parse_error(&ctx.err.interface, @errorName(err));
-                return errors.tag.RunFailed;
+                return errors.tag.Reported;
             };
 
             if (limit == 0) {
                 try errors.add_history_limit_cannot_be_zero(&ctx.err.interface);
-                return errors.tag.RunFailed;
+                return errors.tag.Reported;
             }
             if (limit > history_count) {
                 try errors.add_history_limit_cannot_exceed_history_count(
                     &ctx.err.interface,
                     limit_text.len,
                 );
-                return errors.tag.RunFailed;
+                return errors.tag.Reported;
             }
 
             const history_start = history_count - limit + 1;
@@ -277,23 +277,23 @@ pub fn history(shell: *Shell, ctx: *CommandContext) !void {
                 const result = readline.read_history(file_name_c.ptr);
                 if (result != 0) {
                     try errors.add_history_read_failed(&ctx.err.interface, file_name);
-                    return errors.tag.RunFailed;
+                    return errors.tag.Reported;
                 }
             } else if (std.mem.eql(u8, option, "-w")) {
                 const file_name_c = try arena.dupeSentinel(u8, file_name, 0);
                 const result = readline.write_history(file_name_c.ptr);
                 if (result != 0) {
                     try errors.add_history_write_failed(&ctx.err.interface, file_name);
-                    return errors.tag.RunFailed;
+                    return errors.tag.Reported;
                 }
             } else {
                 try errors.add_history_usage(&ctx.err.interface);
-                return errors.tag.RunFailed;
+                return errors.tag.Reported;
             }
         },
         else => {
             try errors.add_history_usage(&ctx.err.interface);
-            return errors.tag.RunFailed;
+            return errors.tag.Reported;
         },
     }
 }
