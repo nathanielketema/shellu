@@ -35,6 +35,6 @@ pub fn main(init: std.process.Init) !void {
                 else => |e| return e,
             }
         };
-        //shell.reap_jobs();
+        try shell.reap_jobs();
     }
 }

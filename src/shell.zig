@@ -247,9 +247,9 @@ pub const Shell = struct {
         out_file: ?Io.File,
         err_file: ?Io.File,
 
-        pub fn init(commmand: Command) CommandContext {
+        pub fn init(command: Command) CommandContext {
             return .{
-                .command = commmand,
+                .command = command,
                 .in = null,
                 .out = undefined,
                 .err = undefined,
@@ -386,7 +386,7 @@ pub const Shell = struct {
 
     pub fn reap_jobs(shell: *Shell) !void {
         const job_count = shell.jobs.values().len;
-        var job_done_ids: std.ArrayList(u32) = .empty;
+        var job_done_ids: std.ArrayList(Job.Id) = .empty;
         defer job_done_ids.deinit(shell.gpa);
 
         for (shell.jobs.values(), 0..) |*job, i| {
@@ -400,7 +400,7 @@ pub const Shell = struct {
             const status = @tagName(job.status);
             const command = std.mem.trimEnd(u8, job.cmd_text, "&");
 
-            try std.debug.print("shellu: [{d}]{s: <2} {s: <24}{s}\n", .{
+            std.debug.print("shellu: [{d}]{s: <2} {s: <24}{s}\n", .{
                 @intFromEnum(job.id),
                 marker,
                 status,
@@ -410,7 +410,7 @@ pub const Shell = struct {
 
         for (job_done_ids.items) |job_id| {
             if (shell.jobs.get(job_id)) |job| {
-                try shell.id_generator.remove(shell.gpa, job_id);
+                try shell.id_generator.delete(shell.gpa, job_id);
                 shell.gpa.free(job.cmd_text);
             }
             _ = shell.jobs.fetchOrderedRemove(job_id);

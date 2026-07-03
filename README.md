@@ -1,6 +1,7 @@
 # Shellu
 
-A simple shell implemented in zig for educational purposes.
+A simple POSIX compatible shell implemented in [zig](https://ziglang.org/) for educational
+purposes.
 
 ## Start
 
@@ -15,7 +16,7 @@ cd src
 zig build test
 ```
 
-You only need [zig](https://ziglang.org/) 0.16.0 to be able to run it.
+You only need zig 0.16.0 to be able to run it.
 
 ## Implemented features
 
