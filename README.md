@@ -1,7 +1,6 @@
 # Shellu
 
-A simple POSIX compatible shell implemented in [zig](https://ziglang.org/) for educational
-purposes.
+A POSIX compatible shell implemented in [zig](https://ziglang.org/).
 
 ## Start
 
@@ -9,7 +8,7 @@ purposes.
 zig build run
 ```
 
-You only need zig 0.16.0 in order to run it.
+You only need `zig 0.16.0` in order to run it.
 
 ## Implemented features
 

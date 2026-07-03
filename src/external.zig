@@ -45,7 +45,7 @@ pub fn run(shell: *Shell, ctx: *CommandContext, background: bool) !void {
     const id = shell.id_generator.create();
     const pid = child.id.?;
     try argv.append(arena, "&");
-    try shell.jobs.put(arena, id, .{
+    try shell.jobs.put(shell.gpa, id, .{
         .id = id,
         .pid = pid,
         .status = .Running,

@@ -8,7 +8,7 @@ const Pipeline = cmdline.Pipeline;
 const Shell = @import("shell.zig").Shell;
 
 pub fn main(init: std.process.Init) !void {
-    var shell: Shell = try .init(init.io, init.gpa, init.environ_map);
+    var shell = try Shell.init(init.io, init.gpa, init.environ_map);
     defer shell.deinit();
 
     while (true) {

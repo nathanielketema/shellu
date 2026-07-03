@@ -42,19 +42,16 @@ pub const Job = struct {
                 };
             }
 
-            pub fn delete(g: *Generator, gpa: Allocator, id: Id) !void {
-                try g.free.push(gpa, id);
-            }
-
-            pub fn deinit(g: *Generator, gpa: Allocator) void {
-                g.free.deinit(gpa);
+            pub fn delete(g: *Generator, arena: Allocator, id: Id) !void {
+                try g.free.push(arena, id);
             }
         };
     };
-};
 
-var g_env: ?*Environ.Map = null;
-var g_io: ?Io = null;
+    pub fn deinit(job: *Job, gpa: Allocator) void {
+        gpa.free(job.cmd_text);
+    }
+};
 
 pub const Shell = struct {
     io: Io,
@@ -74,16 +71,23 @@ pub const Shell = struct {
         errdefer arena.deinit();
 
         const home_path = env.get("HOME") orelse "/";
-        const history_file = env.get("HISTFILE") orelse try Io.Dir.path.join(gpa, &.{
-            home_path,
-            ".shellu_history",
-        });
+        const history_file = blk: {
+            var hist_file: []const u8 = undefined;
+            if (env.get("HISTFILE")) |file| {
+                hist_file = try arena.allocator().dupe(u8, file);
+            } else {
+                hist_file = try Io.Dir.path.join(arena.allocator(), &.{
+                    home_path,
+                    ".shellu_history",
+                });
+            }
+            break :blk hist_file;
+        };
         const history_offset = try read_history(gpa, history_file);
 
-        readline_completion(io, env);
+        rdl.readline_completion(io, env);
 
         const cwd = try std.process.currentPathAlloc(io, gpa);
-        errdefer gpa.free(cwd);
         assert(cwd.len > 0);
 
         return .{
@@ -104,94 +108,23 @@ pub const Shell = struct {
     pub fn deinit(shell: *Shell) void {
         shell.append_history() catch {};
         {
-            var key_it = shell.variables.keyIterator();
-            while (key_it.next()) |key| shell.gpa.free(key.*);
-            var val_it = shell.variables.valueIterator();
-            while (val_it.next()) |val| shell.gpa.free(val.*);
+            var it = shell.variables.iterator();
+            while (it.next()) |entry| {
+                shell.gpa.free(entry.key_ptr.*);
+                shell.gpa.free(entry.value_ptr.*);
+            }
             shell.variables.deinit();
         }
         {
+            for (shell.jobs.values()) |*job| {
+                job.deinit(shell.gpa);
+            }
             shell.gpa.free(shell.jobs.keys());
             shell.gpa.free(shell.jobs.values());
             shell.jobs.deinit(shell.gpa);
-            shell.id_generator.deinit(shell.gpa);
         }
         shell.gpa.free(shell.cwd);
-        shell.gpa.free(shell.history_file);
         shell.arena.deinit();
-    }
-
-    pub fn readline_completion(io: Io, env: *Environ.Map) void {
-        g_io = io;
-        g_env = env;
-        readline.rl_attempted_completion_function = attempted_completion_function;
-        _ = readline.rl_bind_key('\t', readline.rl_complete);
-        readline.using_history();
-    }
-
-    fn attempted_completion_function(
-        text: [*c]const u8,
-        start: c_int,
-        _: c_int,
-    ) callconv(.c) [*c][*c]u8 {
-        if (start == 0) {
-            return readline.rl_completion_matches(text, completion_matches);
-        }
-        return readline.rl_completion_matches(text, readline.rl_filename_completion_function);
-    }
-
-    fn completion_matches(input: [*c]const u8, index: c_int) callconv(.c) [*c]u8 {
-        const input_slice = std.mem.span(input);
-        var curr_index: c_int = 0;
-
-        for (std.enums.values(builtins.Builtin)) |cmd| {
-            if (std.mem.startsWith(u8, @tagName(cmd), input_slice)) {
-                if (index == curr_index) {
-                    return readline.strdup(@tagName(cmd));
-                }
-                curr_index += 1;
-            }
-        }
-
-        if (path_completion_match(input_slice, index, &curr_index)) |match| {
-            return match;
-        }
-
-        return null;
-    }
-
-    fn path_completion_match(prefix: []const u8, index: c_int, curr_index: *c_int) ?[*c]u8 {
-        const io = g_io orelse return null;
-        const env = g_env orelse return null;
-        const path_value = env.get("PATH") orelse return null;
-
-        var dir_it = std.mem.tokenizeScalar(u8, path_value, ':');
-        while (dir_it.next()) |dir_path| {
-            var dir = Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch continue;
-            defer dir.close(io);
-
-            var entry_it = dir.iterate();
-            while (entry_it.next(io) catch null) |entry| {
-                if (entry.kind != .file and entry.kind != .sym_link) continue;
-                if (!std.mem.startsWith(u8, entry.name, prefix)) continue;
-
-                const stat = dir.statFile(io, entry.name, .{}) catch continue;
-                if (stat.permissions.toMode() & 0o111 == 0) continue;
-
-                if (index == curr_index.*) {
-                    var name_buf: [256]u8 = undefined;
-                    const name_z = std.fmt.bufPrintZ(
-                        &name_buf,
-                        "{s}",
-                        .{entry.name},
-                    ) catch continue;
-                    return readline.strdup(name_z);
-                }
-                curr_index.* += 1;
-            }
-        }
-
-        return null;
     }
 
     pub fn append_history(shell: *Shell) !void {
@@ -229,7 +162,7 @@ pub const Shell = struct {
     }
 
     pub fn parse(shell: *Shell, arena: Allocator, input: [:0]const u8) !Pipeline {
-        var parser: Parser = try .init(arena, input, shell.variables, shell.path_home);
+        var parser = try Parser.init(arena, input, shell.variables, shell.path_home);
         return parser.parse();
     }
 
@@ -278,13 +211,14 @@ pub const Shell = struct {
 
     pub fn run(shell: *Shell, pipeline: Pipeline) !void {
         var pipes: std.ArrayList(Pipe) = .empty;
+        defer pipes.deinit(shell.gpa);
 
         const cmds_count = pipeline.commands.len;
         for (0..cmds_count - 1) |_| {
             var fds: [2]std.os.linux.fd_t = undefined;
             const rc = std.c.pipe(&fds);
             if (rc != 0) return error.Reported;
-            try pipes.append(shell.arena.allocator(), .{
+            try pipes.append(shell.gpa, .{
                 .read = Io.File{ .handle = fds[0], .flags = .{ .nonblocking = false } },
                 .write = Io.File{ .handle = fds[1], .flags = .{ .nonblocking = false } },
             });
@@ -368,7 +302,7 @@ pub const Shell = struct {
                 try ctx.flush();
             } else {
                 var background: bool = false;
-                if (ctx.command.args.len > 1 and
+                if (ctx.command.args.len > 0 and
                     std.mem.eql(u8, ctx.command.args[ctx.command.args.len - 1], "&"))
                 {
                     ctx.command.args = ctx.command.args[0 .. ctx.command.args.len - 1];
@@ -410,10 +344,88 @@ pub const Shell = struct {
 
         for (job_done_ids.items) |job_id| {
             if (shell.jobs.get(job_id)) |job| {
-                try shell.id_generator.delete(shell.gpa, job_id);
+                try shell.id_generator.delete(shell.arena.allocator(), job_id);
                 shell.gpa.free(job.cmd_text);
             }
             _ = shell.jobs.fetchOrderedRemove(job_id);
         }
+    }
+};
+
+pub const rdl = struct {
+    var g_env: ?*Environ.Map = null;
+    var g_io: ?Io = null;
+
+    pub fn readline_completion(io: Io, env: *Environ.Map) void {
+        g_io = io;
+        g_env = env;
+        readline.rl_attempted_completion_function = attempted_completion_function;
+        _ = readline.rl_bind_key('\t', readline.rl_complete);
+        readline.using_history();
+    }
+
+    fn attempted_completion_function(
+        text: [*c]const u8,
+        start: c_int,
+        _: c_int,
+    ) callconv(.c) [*c][*c]u8 {
+        if (start == 0) {
+            return readline.rl_completion_matches(text, completion_matches);
+        }
+        return readline.rl_completion_matches(text, readline.rl_filename_completion_function);
+    }
+
+    fn completion_matches(input: [*c]const u8, index: c_int) callconv(.c) [*c]u8 {
+        const input_slice = std.mem.span(input);
+        var curr_index: c_int = 0;
+
+        for (std.enums.values(builtins.Builtin)) |cmd| {
+            if (std.mem.startsWith(u8, @tagName(cmd), input_slice)) {
+                if (index == curr_index) {
+                    return readline.strdup(@tagName(cmd));
+                }
+                curr_index += 1;
+            }
+        }
+
+        if (path_completion_match(input_slice, index, &curr_index)) |match| {
+            return match;
+        }
+
+        return null;
+    }
+
+    fn path_completion_match(prefix: []const u8, index: c_int, curr_index: *c_int) ?[*c]u8 {
+        const io = g_io orelse return null;
+        const env = g_env orelse return null;
+        const path_value = env.get("PATH") orelse return null;
+
+        var dir_it = std.mem.tokenizeScalar(u8, path_value, ':');
+        while (dir_it.next()) |dir_path| {
+            var dir = Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch continue;
+            defer dir.close(io);
+
+            var entry_it = dir.iterate();
+            while (entry_it.next(io) catch null) |entry| {
+                if (entry.kind != .file and entry.kind != .sym_link) continue;
+                if (!std.mem.startsWith(u8, entry.name, prefix)) continue;
+
+                const stat = dir.statFile(io, entry.name, .{}) catch continue;
+                if (stat.permissions.toMode() & 0o111 == 0) continue;
+
+                if (index == curr_index.*) {
+                    var name_buf: [256]u8 = undefined;
+                    const name_z = std.fmt.bufPrintZ(
+                        &name_buf,
+                        "{s}",
+                        .{entry.name},
+                    ) catch continue;
+                    return readline.strdup(name_z);
+                }
+                curr_index.* += 1;
+            }
+        }
+
+        return null;
     }
 };

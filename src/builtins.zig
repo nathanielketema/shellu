@@ -328,7 +328,7 @@ pub fn jobs(shell: *Shell, ctx: *CommandContext) !void {
     }
 
     for (job_done_ids.items) |job_id| {
-        try shell.id_generator.delete(shell.gpa, job_id);
+        try shell.id_generator.delete(shell.arena.allocator(), job_id);
         if (shell.jobs.get(job_id)) |job| {
             shell.gpa.free(job.cmd_text);
         }
